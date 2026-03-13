@@ -9,8 +9,8 @@ SCHED_SA                       scheduler-invoker@project-a245773d-4395-4d9d-9f6.
 PROJECT_ID                     project-a245773d-4395-4d9d-9f6
 REGION                         us-central1
 BUCKET_NAME                    myscrapers-gsk
-EXTRACTOR_FUNCTION_NAME        
-MATERIALIZE_BODY               
-EXTRACTOR_BODY                 
-TRAIN_DT_BODY                  
+EXTRACTOR_FUNCTION_NAME        extractor-per-listing
+MATERIALIZE_BODY               {}
+EXTRACTOR_BODY                 {"overwrite":true,"max_files":0}
+TRAIN_DT_BODY                  {"dry_run":true}
 

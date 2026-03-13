@@ -9,3 +9,8 @@ SCHED_SA                       @.iam.gserviceaccount.com
 PROJECT_ID                     
 REGION                         
 BUCKET_NAME                    
+EXTRACTOR_FUNCTION_NAME        extractor-per-listing
+MATERIALIZE_BODY               {}
+EXTRACTOR_BODY                 {"overwrite":true,"max_files":0}
+TRAIN_DT_BODY                  {"dry_run": true}
+
