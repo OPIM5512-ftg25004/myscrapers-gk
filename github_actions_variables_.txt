@@ -1,0 +1,11 @@
+==================================================
+🔧 GitHub Actions → Settings → Actions → Variables
+Project:  (Project #)
+==================================================
+WORKLOAD_IDENTITY_PROVIDER     projects//locations/global/workloadIdentityPools//providers/
+DEPLOYER_SA                    @.iam.gserviceaccount.com
+RUNTIME_SA                     @.iam.gserviceaccount.com
+SCHED_SA                       @.iam.gserviceaccount.com
+PROJECT_ID                     
+REGION                         
+BUCKET_NAME                    

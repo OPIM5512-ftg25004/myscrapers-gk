@@ -1,0 +1,16 @@
+==================================================
+🔧 GitHub Actions → Settings → Actions → Variables
+Project: project-a245773d-4395-4d9d-9f6 (Project #817438979878)
+==================================================
+WORKLOAD_IDENTITY_PROVIDER     projects/817438979878/locations/global/workloadIdentityPools/github-pool/providers/gh-actions
+DEPLOYER_SA                    cf-deployer@project-a245773d-4395-4d9d-9f6.iam.gserviceaccount.com
+RUNTIME_SA                     cf-runtime@project-a245773d-4395-4d9d-9f6.iam.gserviceaccount.com
+SCHED_SA                       scheduler-invoker@project-a245773d-4395-4d9d-9f6.iam.gserviceaccount.com
+PROJECT_ID                     project-a245773d-4395-4d9d-9f6
+REGION                         us-central1
+BUCKET_NAME                    myscrapers-gsk
+EXTRACTOR_FUNCTION_NAME        
+MATERIALIZE_BODY               
+EXTRACTOR_BODY                 
+TRAIN_DT_BODY                  
+
