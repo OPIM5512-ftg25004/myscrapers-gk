@@ -3,6 +3,7 @@
 # Reads:  gs://<bucket>/<STRUCTURED_PREFIX>/run_id=*/jsonl/*.jsonl
 # Writes: gs://<bucket>/<STRUCTURED_PREFIX>/datasets/listings_master.csv  (atomic publish)
 
+
 import csv
 import io
 import json
@@ -28,7 +29,7 @@ RUN_ID_PLAIN_RE = re.compile(r"^\d{14}$")        # 20251026170002
 CSV_COLUMNS = [
     "post_id", "run_id", "scraped_at",
     "price", "year", "make", "model", "mileage",
-    "source_txt"
+    "door", "fuel", "title_status", "source_txt"
 ]
 
 def _list_run_ids(bucket: str, structured_prefix: str) -> list[str]:
@@ -78,15 +79,16 @@ def _open_gcs_text_writer(bucket: str, key: str):
     # Text mode avoids the flush/finalize pitfall of binary+TextIOWrapper
     return blob.open("w")  # newline handled by csv module
 
-
 def _write_csv(records: Iterable[Dict], dest_key: str, columns=CSV_COLUMNS) -> int:
     n = 0
     with _open_gcs_text_writer(BUCKET_NAME, dest_key) as out:
-        w = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore")
+        
+        # Ensures that the old files do not break from this function with restval="unknown"
+        w = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore", restval="unknown")
         w.writeheader()
         for rec in records:
-            row = {c: rec.get(c, None) for c in columns}
-            w.writerow(row)
+            # row = {c: rec.get(c, None) for c in columns}
+            w.writerow(rec)
             n += 1
     return n  # close() finalizes the upload
 
@@ -129,3 +131,4 @@ def materialize_http(request: Request):
     except Exception as e:
         # Return a JSON error so you don't just see a plain 500
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+    
