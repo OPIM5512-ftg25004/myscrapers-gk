@@ -136,7 +136,7 @@ def parse_listing(text: str) -> dict:
     if ft:
         d["fuel"] = ft.group(1).strip().lower()
 
-    ts = re.search(r'title status:\s*([^\n]+)', text, re.I)
+    ts = re.search(r'title\s+status\s*:\s*([A-Za-z]+?)(?:\n|$)', text, re.I)
     if ts:
         d["title_status"] = ts.group(1).strip().lower()
 
