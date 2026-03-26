@@ -40,7 +40,7 @@ PRICE_RE      = re.compile(r"\$\s?([0-9,]+)")
 YEAR_RE       = re.compile(r"\b(19|20)\d{2}\b")
 MAKE_MODEL_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][A-Za-z0-9]+)")
 
-FUEL_TYPE = re.compile(r'\b(gas|diesel|hybrid|electric|other)', re.IGNORECASE)
+FUEL_TYPE = re.compile(r'\b(gas|gasoline|diesel|hybrid|electric|other)', re.IGNORECASE)
 TITLE_STATUS = re.compile(r'\b(clean|salvage|rebuilt|parts only|lien|missing|)', re.IGNORECASE)
 
 # FUEL_TYPE = re.compile(r'fuel\s*[:\-]?\s*([a-z]+)', re.IGNORECASE)
@@ -157,7 +157,7 @@ def parse_listing(text: str) -> dict:
         d["fuel"] = ft.group(1).strip().lower()
 
 # ts = re.search(r'title\s+status\s*:\s*([A-Za-z]+?)(?:\n|$)', text, re.I)
-    ts = TITLE_STATUS.search(text)
+    ts = re.search(r"title\s+status\s*:\s*([A-Za-z ]+?)(?:\n|$)", text, re.I)
     if ts:
         d["title_status"] = ts.group(1).strip().lower()
 
