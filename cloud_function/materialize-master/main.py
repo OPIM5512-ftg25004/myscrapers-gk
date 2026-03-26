@@ -29,7 +29,7 @@ RUN_ID_PLAIN_RE = re.compile(r"^\d{14}$")        # 20251026170002
 CSV_COLUMNS = [
     "post_id", "run_id", "scraped_at",
     "price", "year", "make", "model", "mileage",
-    "door", "fuel", "title_status", "source_txt"
+    "fuel", "title_status", "source_txt"
 ]
 
 def _list_run_ids(bucket: str, structured_prefix: str) -> list[str]:

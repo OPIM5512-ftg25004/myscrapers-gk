@@ -39,8 +39,8 @@ storage_client = storage.Client()
 PRICE_RE      = re.compile(r"\$\s?([0-9,]+)")
 YEAR_RE       = re.compile(r"\b(19|20)\d{2}\b")
 MAKE_MODEL_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][A-Za-z0-9]+)")
-FUEL_TYPE = re.compile(r'fuel:\s*([^\n]+)', re.IGNORECASE)
-TTITLE_STATUS = re.compile(r'title status:\s*([^\n]+)', re.IGNORECASE)
+FUEL_TYPE = re.compile(r'fuel:\s*(.*)', re.IGNORECASE)
+TITLE_STATUS = re.compile(r'title\s+status:\s*(.*)', re.IGNORECASE)
 
 # -------------------- HELPERS --------------------
 def _list_run_ids(bucket: str, scrapes_prefix: str) -> list[str]:
@@ -132,11 +132,13 @@ def parse_listing(text: str) -> dict:
         d["make"] = mm.group(1)
         d["model"] = mm.group(2)
 
-    ft = re.search(r'fuel:\s*([^\n]+)', text, re.I)
+# re.search(r'fuel:\s*([^\n]+)', text, re.I)
+    ft = FUEL_TYPE.search(text)
     if ft:
         d["fuel"] = ft.group(1).strip().lower()
 
-    ts = re.search(r'title\s+status\s*:\s*([A-Za-z]+?)(?:\n|$)', text, re.I)
+# ts = re.search(r'title\s+status\s*:\s*([A-Za-z]+?)(?:\n|$)', text, re.I)
+    ts = TITLE_STATUS.search(text)
     if ts:
         d["title_status"] = ts.group(1).strip().lower()
 
