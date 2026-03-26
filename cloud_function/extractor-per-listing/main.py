@@ -40,8 +40,11 @@ PRICE_RE      = re.compile(r"\$\s?([0-9,]+)")
 YEAR_RE       = re.compile(r"\b(19|20)\d{2}\b")
 MAKE_MODEL_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][A-Za-z0-9]+)")
 
-FUEL_TYPE    = re.compile(r'fuel:\s*[\n\r]*\s*(\w+)', re.IGNORECASE)
-TITLE_STATUS = re.compile(r'title status:\s*[\n\r]*\s*(\w+)', re.IGNORECASE)
+FUEL_TYPE    = re.compile(r'fuel:\s*[\r\n]*\s*(\w+)', re.IGNORECASE)
+TITLE_STATUS = re.compile(r'title\s+status:\s*[\r\n]*\s*(\w+)', re.IGNORECASE)
+
+# FUEL_TYPE    = re.compile(r'fuel:\s*[\n\r]*\s*(\w+)', re.IGNORECASE)
+# TITLE_STATUS = re.compile(r'title status:\s*[\n\r]*\s*(\w+)', re.IGNORECASE)
 
 #  FUEL_TYPE    = re.compile(r'fuel\s*[:\-]?\s*(.+)', re.IGNORECASE)
 # TITLE_STATUS = re.compile(r'title\s+status\s*[:\-]?\s*(.+)', re.IGNORECASE)
