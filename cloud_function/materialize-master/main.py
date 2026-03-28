@@ -32,6 +32,13 @@ CSV_COLUMNS = [
     "fuel", "title_status", "source_txt"
 ]
 
+LLM_CSV_COLUMNS = [
+    "post_id", "run_id", "scraped_at",
+    "price", "year", "make", "model", "mileage",
+    "transmission", "condition", "color",
+    "source_txt", "llm_model"
+]
+
 def _list_run_ids(bucket: str, structured_prefix: str) -> list[str]:
     it = storage_client.list_blobs(bucket, prefix=f"{structured_prefix}/", delimiter="/")
     for _ in it:  # populate it.prefixes
@@ -131,4 +138,43 @@ def materialize_http(request: Request):
     except Exception as e:
         # Return a JSON error so you don't just see a plain 500
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
-    
+
+
+### Assignment 3 Part
+# Look in the 'jsonl_llm' sub-directory pointing towards the sub-folder as created by the LLM extractor
+def _llm_jsonl_records_for_run(bucket: str, structured_prefix: str, run_id: str):
+    b = storage_client.bucket(bucket)
+    prefix = f"{structured_prefix}/run_id={run_id}/jsonl_llm/" 
+    for blob in b.list_blobs(prefix=prefix):
+        if not blob.name.endswith(".jsonl"):
+            continue
+        try:
+            rec = json.loads(blob.download_as_text().strip())
+            yield rec
+        except Exception:
+            continue
+
+# Add the new HTTP entry point for the materialize-llm function
+def materialize_llm_http(request: Request):
+    try:
+        run_ids = _list_run_ids(BUCKET_NAME, STRUCTURED_PREFIX)
+        latest_by_post: Dict[str, Dict] = {}
+        
+        for rid in run_ids:
+            # Use the LLM-specific record fetcher
+            for rec in _llm_jsonl_records_for_run(BUCKET_NAME, STRUCTURED_PREFIX, rid):
+                pid = rec.get("post_id")
+                if not pid: continue
+                latest_by_post[pid] = rec
+
+        final_key = f"{STRUCTURED_PREFIX}/datasets/listings_llm.csv"
+        rows = _write_csv(latest_by_post.values(), final_key, columns=LLM_CSV_COLUMNS)
+
+        return jsonify({
+            "ok": True,
+            "unique_listings": len(latest_by_post),
+            "rows_written": rows,
+            "output_csv": f"gs://{BUCKET_NAME}/{final_key}"
+        }), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
