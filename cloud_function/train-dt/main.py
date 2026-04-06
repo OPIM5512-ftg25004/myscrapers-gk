@@ -39,6 +39,30 @@ def _clean_numeric(s: pd.Series) -> pd.Series:
     s = s.astype(str).str.replace(r"[^\d.]+", "", regex=True).str.strip()
     return pd.to_numeric(s, errors="coerce")
 
+def run_once(dry_run = False):
+    client = storage.Client(project=PROJECT_ID)
+    df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
+
+    # 1. Perform Feature Engineering & Cleaning
+    df["price_num"]   = _clean_numeric(df["price"])
+    df["year_num"]    = _clean_numeric(df["year"])
+    df["mileage_num"] = _clean_numeric(df["mileage"])
+
+    # 2. Identify LLM Columns as Features
+    target = "price_num"
+    cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
+    num_cols = ["year_num", "mileage_num"]
+    feats = cat_cols + num_cols
+
+    # 3. Perform Pipeline Preprocessing
+    preprocess = ColumnTransformer([
+            ("num", SimpleImputer(strategy="median"), num_cols),
+            ("cat", Pipeline([
+                ("imp", SimpleImputer(strategy="most_frequent")),
+                ("oh", OneHotEncoder(handle_unknown="ignore"))
+            ]), cat_cols)
+        ])
+
 def run_once(dry_run: bool = False, max_depth: int = 12, min_samples_leaf: int = 10):
     client = storage.Client(project=PROJECT_ID)
     df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
