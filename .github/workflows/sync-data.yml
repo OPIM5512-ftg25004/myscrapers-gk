@@ -1,5 +1,6 @@
 name: Data Sync Daily Predictions to Repo
 run-name: Syncing daily predictions for ${{ github.ref_name }} by @${{ github.actor }} 
+
 on:
   push:
     branches: [ "main" ]
@@ -7,30 +8,25 @@ on:
     - cron: '45 * * * *' # Every hour at 45 minutes past the hour
   workflow_dispatch: 
 
-# Runs once a day at 04:00 AM UTC (12:00 AM ET)
-
 permissions:
-  contents: write # REQUIRED to commit and push files
-  id-token: write # REQUIRED for Workload Identity Federation (WIF)
+  contents: write 
+  id-token: write 
 
-# Inherit variables from your existing setup
 env:
   PROJECT_ID: ${{ vars.PROJECT_ID }}
   BUCKET_NAME: ${{ vars.BUCKET_NAME }}
   WORKLOAD_IDENTITY_PROVIDER: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
   DEPLOYER_SA: ${{ vars.DEPLOYER_SA }}
-  GCS_PREDS_PREFIX: "structured/preds" # Base path for your prediction folders
-  OUTPUT_DIR: "results" # Local folder to store all timestamped files
+  GCS_PREDS_PREFIX: "structured/preds" 
+  OUTPUT_DIR: "results" 
 
 jobs:
   sync_data:
     runs-on: ubuntu-latest
     steps:
-      # --- 1. SETUP & AUTHENTICATION ---
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          # FIX: Explicitly grant the GITHUB_TOKEN write access for push/rebase
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Auth (WIF) and Setup gcloud
@@ -43,58 +39,29 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      # --- 2. DOWNLOAD AND RENAME DATA ---
-      - name: Find Latest Run ID, Download, and Rename File
-        id: download_rename # Step ID used to reference outputs later
+      - name: Sync 14-Digit Run Folders from GCS
+        id: sync_rsync
         shell: bash
         run: |
           set -euo pipefail
-          
-          # 2a. Find the LATEST folder/run_id in GCS
-          LATEST_RUN_DIR=$(gsutil ls -d gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/*/ | tail -1)
-          
-          # 2b. Extract the timestamp (folder name, e.g., 2025120816)
-          LATEST_RUN_ID=$(echo "$LATEST_RUN_DIR" | sed -E "s|gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/||; s|/||")
-
-          # 2c. Define file paths and save variables to GITHUB_OUTPUT
-          LOCAL_FILENAME="$LATEST_RUN_ID-preds.csv"
-          GCS_SOURCE_FILE="${{ env.GCS_PREDS_PREFIX }}/$LATEST_RUN_ID/preds.csv"
-          LOCAL_TARGET_FILE="${{ env.OUTPUT_DIR }}/$LOCAL_FILENAME"
-          
-          echo "run_id=$LATEST_RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "filename=$LOCAL_FILENAME" >> "$GITHUB_OUTPUT"
-          
-          echo "Detected latest run ID: $LATEST_RUN_ID"
-          
-          # 2d. Create local folder and copy the file
           mkdir -p ${{ env.OUTPUT_DIR }} 
-          gsutil cp gs://${BUCKET_NAME}/${GCS_SOURCE_FILE} ${LOCAL_TARGET_FILE}
           
-          echo "Successfully copied: gs://${BUCKET_NAME}/${GCS_SOURCE_FILE} to ${LOCAL_TARGET_FILE}"
+          # This specifically matches any folder name containing 14 digits
+          gsutil -m rsync -r -x '^(?!.*[0-9]{14})' gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/ ${{ env.OUTPUT_DIR }}/
+          
+          echo "Successfully synced all 14-digit RUN_ID folders to ${{ env.OUTPUT_DIR }}"
 
-      # --- 3. COMMIT AND PUSH ---
-      - name: Commit and Push New Timestamped File
-        if: success() 
+      - name: Commit and Push All Changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # Retrieve variables from the previous step's output
-          FILENAME="${{ steps.download_rename.outputs.filename }}"
-          RUN_ID="${{ steps.download_rename.outputs.run_id }}"
+          git add ${{ env.OUTPUT_DIR }}
           
-          # Stage ONLY the specific results file
-          git add "${{ env.OUTPUT_DIR }}/$FILENAME"
-          
-          # --- FIX: Only commit if the file is actually NEW or CHANGED ---
           if git diff --staged --quiet; then
-            echo "No new data changes detected for Run $RUN_ID. Skipping commit."
+            echo "No new data detected. Skipping commit."
           else
-            git commit -m "🤖 Data Sync: Add prediction file for run $RUN_ID"
-            
-            # Pull latest changes to avoid 'rejected' errors
+            git commit -m "🤖 Data Sync: Update historical predictions and artifacts"
             git pull --rebase origin main 
-            
-            # Push the changes
             git push
           fi
