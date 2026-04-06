@@ -156,7 +156,7 @@ def _safe_int(x):
 # -------------------- VERTEX AI CALL --------------------
 def _vertex_extract_fields(raw_text: str) -> dict:
     """
-    Ask Gemini to return JSON with exactly: price, year, make, model, mileage.
+    Ask Gemini to return JSON with exactly: price, year, make, model, mileage, transmission, condition, and color.
     """
     model = _get_vertex_model()
 
@@ -173,7 +173,7 @@ def _vertex_extract_fields(raw_text: str) -> dict:
             "condition": {"type": "string", "nullable": True},
             "color": {"type": "string", "nullable": True}
         },
-        "required": ["price", "year", "make", "model", "mileage", "transmission"]
+        "required": ["price", "year", "make", "model", "mileage", "transmission", "condition", "color"]
     }
 
     # System instruction (will be prepended to the prompt)
@@ -183,6 +183,7 @@ def _vertex_extract_fields(raw_text: str) -> dict:
         "If a value is not present, use null. "
         "Rules: integers for price/year/mileage; price in USD; mileage in miles; "
         "do not infer values not explicitly present; do not add extra keys."
+        "The transmission can be only automatic or manual; leave empty if not listed "
     )
 
     # FIX: Combine instruction and text into one prompt string (SDK compatibility)
