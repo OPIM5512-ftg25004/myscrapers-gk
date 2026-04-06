@@ -107,25 +107,61 @@ def _llm_jsonl_records_for_run(bucket: str, structured_prefix: str, run_id: str)
 
 # Add the new HTTP entry point for the materialize-http function
 def materialize_http(request: Request):
+    """
+    Optimized Materialize:
+    1. Loads existing Master CSV.
+    2. Only scans GCS folders from the last 75 minutes.
+    3. Merges/Deduplicates new data into the Master records.
+    """
     try:
-        run_ids = _list_run_ids(BUCKET_NAME, STRUCTURED_PREFIX)
-        latest_by_post: Dict[str, Dict] = {}
+        if not BUCKET_NAME:
+            return jsonify({"ok": False, "error": "missing GCS_BUCKET env"}), 500
+
+        # 1. Load the EXISTING 'Master' data first (The "Past Code" approach)
+        # This prevents recreating the entire dataset from scratch every hour.
+        final_key = f"{STRUCTURED_PREFIX}/datasets/{OUTPUT_FILENAME}"
+        master_records = _get_existing_master_data(BUCKET_NAME, final_key)
         
-        for rid in run_ids:
-            # Use the LLM-specific record fetcher
+        # 2. Filter for ONLY recent runs (The "75-minute" performance fix)
+        all_run_ids = _list_run_ids(BUCKET_NAME, STRUCTURED_PREFIX)
+        limit_time = datetime.now(timezone.utc) - timedelta(minutes=75)
+        
+        # We only care about runs newer than 75 mins ago
+        recent_runs = [r for r in all_run_ids if _run_id_to_dt(r) > limit_time]
+
+        if not recent_runs:
+            return jsonify({
+                "ok": True, 
+                "message": "No new runs found in the last 75 minutes. Master CSV is already up to date.",
+                "total_listings": len(master_records)
+            }), 200
+
+        # 3. Fetch ONLY the new records and merge/deduplicate
+        for rid in recent_runs:
+            # Use your LLM-specific fetcher
             for rec in _llm_jsonl_records_for_run(BUCKET_NAME, STRUCTURED_PREFIX, rid):
                 pid = rec.get("post_id")
-                if not pid: continue
-                latest_by_post[pid] = rec
+                if not pid: 
+                    continue
+                
+                # Update the record if it's new OR if this specific run is newer 
+                # than what we currently have in our master dictionary
+                prev = master_records.get(pid)
+                if (prev is None) or (_run_id_to_dt(rid) >= _run_id_to_dt(prev.get("run_id", ""))):
+                    # Attach the run_id to the record so we can track freshness
+                    rec["run_id"] = rid 
+                    master_records[pid] = rec
 
-        final_key = f"{STRUCTURED_PREFIX}/datasets/{OUTPUT_FILENAME}"
-        rows = _write_csv(latest_by_post.values(), final_key, columns=CSV_COLUMNS)
+        # 4. Save the merged result back to GCS
+        rows_written = _write_csv(master_records.values(), final_key, columns=CSV_COLUMNS)
 
         return jsonify({
             "ok": True,
-            "unique_listings": len(latest_by_post),
-            "rows_written": rows,
+            "recent_runs_scanned": len(recent_runs),
+            "total_listings_in_master": rows_written,
             "output_csv": f"gs://{BUCKET_NAME}/{final_key}"
         }), 200
+
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        # Improved error logging for debugging
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {str(e)}"}), 500
