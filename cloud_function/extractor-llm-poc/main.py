@@ -156,7 +156,7 @@ def _safe_int(x):
 # -------------------- VERTEX AI CALL --------------------
 def _vertex_extract_fields(raw_text: str) -> dict:
     """
-    Ask Gemini to return JSON with exactly: price, year, make, model, mileage, transmission, condition, color, city, state, and zip_code.
+    Ask Gemini to return JSON with exactly: price, year, make, model, mileage, transmission, condition, color, city, state, zip_code.
     """
     model = _get_vertex_model()
 
@@ -329,6 +329,9 @@ def llm_extract_http(request: Request):
                 "transmission": parsed.get("transmission"),
                 "condition": parsed.get("condition"),
                 "color": parsed.get("color"),
+                "city": parsed.get("city"),
+                "state": parsed.get("state"),
+                "zip_code": parsed.get("zip_code"),
                 "llm_provider": "vertex",
                 "llm_model": LLM_MODEL,
                 "llm_ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
