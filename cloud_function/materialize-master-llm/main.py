@@ -9,7 +9,7 @@ import io
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Iterable
 
 from flask import Request, jsonify
@@ -104,6 +104,25 @@ def _llm_jsonl_records_for_run(bucket: str, structured_prefix: str, run_id: str)
             yield rec
         except Exception:
             continue
+
+def _get_existing_master_data(bucket_name: str, key: str) -> Dict[str, Dict]:
+    """Downloads existing master CSV and returns a dict keyed by post_id."""
+    b = storage_client.bucket(bucket_name)
+    blob = b.blob(key)
+    data = {}
+    if not blob.exists():
+        return data
+    
+    try:
+        content = blob.download_as_text()
+        reader = csv.DictReader(io.StringIO(content))
+        for row in reader:
+            pid = row.get("post_id")
+            if pid:
+                data[pid] = row
+    except Exception:
+        pass 
+    return data
 
 # Add the new HTTP entry point for the materialize-http function
 def materialize_http(request: Request):
