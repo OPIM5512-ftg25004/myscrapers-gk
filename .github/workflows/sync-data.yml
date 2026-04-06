@@ -39,17 +39,21 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Sync 14-Digit Run Folders from GCS
+      - name: Sync All Predictions from GCS
         id: sync_rsync
         shell: bash
         run: |
           set -euo pipefail
+          
+          # Ensure the local results folder exists
           mkdir -p ${{ env.OUTPUT_DIR }} 
           
-          # This specifically matches any folder name containing 14 digits
-          gsutil -m rsync -r -x '^(?!.*[0-9]{14})' gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/ ${{ env.OUTPUT_DIR }}/
+          # -r: recursive (gets all subfolders)
+          # -m: multi-threaded (faster download)
+          # This syncs EVERYTHING from your specific GCS path to your repo
+          gsutil -m rsync -r gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/ ${{ env.OUTPUT_DIR }}/
           
-          echo "Successfully synced all 14-digit RUN_ID folders to ${{ env.OUTPUT_DIR }}"
+          echo "Successfully synced all folders from gs://${BUCKET_NAME}/${GCS_PREDS_PREFIX}/ to ${{ env.OUTPUT_DIR }}"
 
       - name: Commit and Push All Changes
         run: |
