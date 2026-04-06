@@ -1,5 +1,5 @@
-name: Data Sync Hourly Predictions to Repo
-run-name: Syncing hourly predictions for ${{ github.ref_name }} by @${{ github.actor }} 
+name: Data Sync Daily Predictions to Repo
+run-name: Syncing daily predictions for ${{ github.ref_name }} by @${{ github.actor }} 
 on:
   schedule:
     - cron: '0 4 * * *' # Runs once a day at 04:00 AM UTC (12:00 AM ET)
