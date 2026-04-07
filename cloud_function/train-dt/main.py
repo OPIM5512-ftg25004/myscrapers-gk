@@ -81,6 +81,21 @@ def run_once(dry_run=False):
 
     # 2. Advanced Features & Modeling
     cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
+    for col in cat_cols:
+        # 1. Convert to string (fixes the mixed-type sorting error)
+        df[col] = df[col].astype(str)
+    
+        # 2. Trim whitespace and handle "nan" strings or empty values
+        df[col] = df[col].str.strip()
+    
+        # 3. Standardize all "missing" variants to a single label
+        # This catches: "", "nan", "None", "null"
+        missing_variants = ["", "nan", "None", "None", "null", "nan"]
+        df[col] = df[col].replace(missing_variants, "unknown")
+        
+    # Clean up zip_code specifically one more time if needed
+    df['zip_code'] = df['zip_code'].str.zfill(5)
+
     num_cols = ["year_num", "mileage_num"]
     feats = cat_cols + num_cols
     target = "price_num"
