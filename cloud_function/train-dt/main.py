@@ -51,9 +51,11 @@ def run_once(dry_run=False):
     logging.info("Running Training Version 2.0 with Categorical Fix")
     client = storage.Client(project=PROJECT_ID)
     df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
-
-    # 1. Categorical Cleaning (before splitting)
+    
+    # Define this list FIRST so the loop below knows what to do
     cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
+
+    # 1. Categorical Cleaning (now safely defined)
     for col in cat_cols:
         df[col] = df[col].astype(str).str.strip()
         missing_variants = ["", "nan", "None", "null", "NaN", "nan"]
@@ -89,13 +91,11 @@ def run_once(dry_run=False):
     feats = cat_cols + num_cols
     target = "price_num"
 
-    # Force OneHotEncoder to treat everything as a string internally
     pre = ColumnTransformer([
         ("num", SimpleImputer(strategy="median"), num_cols),
         ("cat", Pipeline([
             ("imp", SimpleImputer(strategy="most_frequent")),
-            # Use dtype=str to force the encoder to treat inputs as strings
-            ("oh", OneHotEncoder(handle_unknown="ignore", dtype=str)) 
+            ("oh", OneHotEncoder(handle_unknown="ignore")) 
         ]), cat_cols)
     ])
 
