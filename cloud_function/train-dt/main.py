@@ -19,7 +19,7 @@ from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 PROJECT_ID     = os.getenv("PROJECT_ID", "")
 GCS_BUCKET     = os.getenv("GCS_BUCKET", "")
 DATA_KEY       = os.getenv("DATA_KEY", "structured/datasets/listings_master.csv")
-OUTPUT_PREFIX  = os.getenv("OUTPUT_PREFIX", "preds")            # e.g., "structured/preds"
+OUTPUT_PREFIX  = os.getenv("OUTPUT_PREFIX", "structured/preds")            # e.g., "structured/preds"
 TIMEZONE       = os.getenv("TIMEZONE", "America/New_York")      # split by local day
 LOG_LEVEL      = os.getenv("LOG_LEVEL", "INFO")
 
@@ -32,6 +32,13 @@ def _read_csv_from_gcs(client: storage.Client, bucket: str, key: str) -> pd.Data
         raise FileNotFoundError(f"gs://{bucket}/{key} not found")
     return pd.read_csv(io.BytesIO(blob.download_as_bytes()))
 
+def _write_to_gcs(client, bucket, key, data, content_type="text/csv"):
+    blob = client.bucket(bucket).blob(key)
+    if isinstance(data, pd.DataFrame):
+        blob.upload_from_string(data.to_csv(index=False), content_type=content_type)
+    else:
+        blob.upload_from_string(data, content_type=content_type)
+
 def _write_csv_to_gcs(client: storage.Client, bucket: str, key: str, df: pd.DataFrame):
     b = client.bucket(bucket)
     blob = b.blob(key)
@@ -42,181 +49,106 @@ def _clean_numeric(s: pd.Series) -> pd.Series:
     s = s.astype(str).str.replace(r"[^\d.]+", "", regex=True).str.strip()
     return pd.to_numeric(s, errors="coerce")
 
-def run_once(dry_run = False):
+def run_once(dry_run=False):
     client = storage.Client(project=PROJECT_ID)
     df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
 
-    # 1. Perform Feature Engineering & Cleaning
-    df["price_num"]   = _clean_numeric(df["price"])
-    df["year_num"]    = _clean_numeric(df["year"])
-    df["mileage_num"] = _clean_numeric(df["mileage"])
-
-    # 2. Identify LLM Columns as Features
-    target = "price_num"
-    cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
-    num_cols = ["year_num", "mileage_num"]
-    feats = cat_cols + num_cols
-
-    # 3. Time-Series Split (Past vs Today)
-    df["dt"] = pd.to_datetime(df["scraped_at"], utc=True).dt.tz_convert(TIMEZONE)
-    unique_dates = sorted(df["dt"].dt.date.dropna().unique())
-    today = unique_dates[-1]
-    
-    train_df = df[df["dt"].dt.date < today].dropna(subset=[target])
-    holdout_df = df[df["dt"].dt.date == today]
-
-    X_train, y_train = train_df[feats], train_df[target]
-
-    # 4. Perform Pipeline Preprocessing
-    pre = ColumnTransformer([
-            ("num", SimpleImputer(strategy="median"), num_cols),
-            ("cat", Pipeline([
-                ("imp", SimpleImputer(strategy="most_frequent")),
-                ("oh", OneHotEncoder(handle_unknown="ignore"))
-            ]), cat_cols)
-        ])
-
-    # 5. Perform Hyperparameter Tuning with Optuna
-    def objective(trial):
-        params = {
-            "max_depth": trial.suggest_int("max_depth", 3, 20),
-            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 30),
-            "min_samples_split": trial.suggest_int("min_samples_split", 2, 20)
-        }
-        model = DecisionTreeRegressor(**params, random_state=42)
-        pipe = Pipeline([("pre", pre), ("reg", model)])
-        
-        # Simple Validation split (last 20% of training data)
-        split = int(len(X_train) * 0.8)
-        pipe.fit(X_train.iloc[:split], y_train.iloc[:split])
-        val_preds = pipe.predict(X_train.iloc[split:])
-        return mean_absolute_error(y_train.iloc[split:], val_preds)
-
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20)
-    
-    # Final Fit with Best Parameters
-    final_model = DecisionTreeRegressor(**study.best_params, random_state=42)
-    final_pipe = Pipeline([("pre", pre), ("reg", final_model)])
-    final_pipe.fit(X_train, y_train)
-
-def run_once(dry_run: bool = False, max_depth: int = 12, min_samples_leaf: int = 10):
-    client = storage.Client(project=PROJECT_ID)
-    df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
-
-    required = {"scraped_at", "price", "make", "model", "year", "mileage"}
-    missing = required - set(df.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    # --- Parse timestamps and choose local-day split ---
+    # 1.  Cleaning & Date Splitting
     dt = pd.to_datetime(df["scraped_at"], errors="coerce", utc=True)
-    df["scraped_at_dt_utc"] = dt
     try:
-        df["scraped_at_local"] = df["scraped_at_dt_utc"].dt.tz_convert(TIMEZONE)
+        df["dt_local"] = dt.dt.tz_convert(TIMEZONE)
     except Exception:
-        df["scraped_at_local"] = df["scraped_at_dt_utc"]
-    df["date_local"] = df["scraped_at_local"].dt.date
+        df["dt_local"] = dt
+    df["date_local"] = df["dt_local"].dt.date
 
-    # --- Clean numerics BEFORE counting/dropping ---
-    orig_rows = len(df)
     df["price_num"]   = _clean_numeric(df["price"])
     df["year_num"]    = _clean_numeric(df["year"])
     df["mileage_num"] = _clean_numeric(df["mileage"])
-
-    valid_price_rows = int(df["price_num"].notna().sum())
-    logging.info("Rows total=%d | with valid numeric price=%d", orig_rows, valid_price_rows)
-
-    counts = df["date_local"].value_counts().sort_index()
-    logging.info("Recent date counts (local): %s", json.dumps({str(k): int(v) for k, v in counts.tail(8).items()}))
 
     unique_dates = sorted(d for d in df["date_local"].dropna().unique())
     if len(unique_dates) < 2:
-        return {"status": "noop", "reason": "need at least two distinct dates", "dates": [str(d) for d in unique_dates]}
+        return {"status": "noop", "reason": "need at least two distinct dates"}
 
     today_local = unique_dates[-1]
-    train_df   = df[df["date_local"] <  today_local].copy()
+    train_df = df[df["date_local"] < today_local].dropna(subset=["price_num"])
     holdout_df = df[df["date_local"] == today_local].copy()
 
-    train_df = train_df[train_df["price_num"].notna()]
-    dropped_for_target = int((df["date_local"] < today_local).sum()) - int(len(train_df))
-    logging.info("Train rows after target clean: %d (dropped_for_target=%d)", len(train_df), dropped_for_target)
-    logging.info("Holdout rows today (%s): %d", today_local, len(holdout_df))
-
     if len(train_df) < 40:
-        return {"status": "noop", "reason": "too few training rows", "train_rows": int(len(train_df))}
+        return {"status": "noop", "reason": "too few training rows", "count": len(train_df)}
 
-    # --- Model: make, model, year_num, mileage_num -> price_num ---
-    target = "price_num"
-    cat_cols = ["make", "model"]
+    # 2. Advanced Features & Modeling
+    cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
     num_cols = ["year_num", "mileage_num"]
     feats = cat_cols + num_cols
+    target = "price_num"
 
-    pre = ColumnTransformer(
-        transformers=[
-            ("num", SimpleImputer(strategy="median"), num_cols),
-            ("cat", Pipeline([
-                ("imp", SimpleImputer(strategy="most_frequent")),
-                ("oh", OneHotEncoder(handle_unknown="ignore"))
-            ]), cat_cols),
-        ]
-    )
+    pre = ColumnTransformer([
+        ("num", SimpleImputer(strategy="median"), num_cols),
+        ("cat", Pipeline([
+            ("imp", SimpleImputer(strategy="most_frequent")),
+            ("oh", OneHotEncoder(handle_unknown="ignore"))
+        ]), cat_cols)
+    ])
 
-    model = DecisionTreeRegressor(max_depth=max_depth, min_samples_leaf=min_samples_leaf, random_state=42)
-    pipe = Pipeline([("pre", pre), ("model", model)])
+    def objective(trial):
+        params = {
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 30)
+        }
+        pipe = Pipeline([("pre", pre), ("reg", DecisionTreeRegressor(**params, random_state=42))])
+        # Simple split for speed
+        split = int(len(train_df) * 0.8)
+        pipe.fit(train_df[feats].iloc[:split], train_df[target].iloc[:split])
+        preds = pipe.predict(train_df[feats].iloc[split:])
+        return mean_absolute_error(train_df[target].iloc[split:], preds)
 
-    X_train = train_df[feats]
-    y_train = train_df[target]
-    pipe.fit(X_train, y_train)
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=15)
+    
+    final_pipe = Pipeline([("pre", pre), ("reg", DecisionTreeRegressor(**study.best_params, random_state=42))])
+    final_pipe.fit(train_df[feats], train_df[target])
 
-    # ---- Predict/evaluate on today's holdout (now includes actual price fields) ----
-    mae_today = None
-    preds_df = pd.DataFrame()
-    if not holdout_df.empty:
-        X_h = holdout_df[feats]
-        y_hat = pipe.predict(X_h)
+    # 3. Artifact Generation & Output
+    out_dir = f"{OUTPUT_PREFIX}/{today_local.strftime('%Y%m%d')}" if hasattr(today_local, 'strftime') else f"{OUTPUT_PREFIX}/{today_local}"
+    
+    # Predictions
+    y_hat = final_pipe.predict(holdout_df[feats])
+    preds_df = holdout_df[["post_id", "scraped_at", "make", "model", "year", "mileage", "price"]].copy()
+    preds_df["actual_price"] = holdout_df["price_num"]
+    preds_df["pred_price"] = np.round(y_hat, 2)
 
-        cols = ["post_id", "scraped_at", "make", "model", "year", "mileage", "price"]
-        preds_df = holdout_df[cols].copy()
-        preds_df["actual_price"] = holdout_df["price_num"]       # cleaned numeric truth
-        preds_df["pred_price"]   = np.round(y_hat, 2)
+    if not dry_run:
+        # Save CSV
+        _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/preds.csv", preds_df)
+        
+        # Save Permutation Importance
+        perm = permutation_importance(final_pipe, train_df[feats], train_df[target], n_repeats=5)
+        imp_df = pd.DataFrame({"feature": feats, "importance": perm.importances_mean})
+        _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/importance.csv", imp_df)
 
-        if holdout_df["price_num"].notna().any():
-            y_true = holdout_df["price_num"]
-            mask = y_true.notna()
-            if mask.any():
-                mae_today = float(mean_absolute_error(y_true[mask], y_hat[mask]))
+        # Save PDP Plots
+        top_3 = imp_df.sort_values("importance", ascending=False)["feature"].head(3).tolist()
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        PartialDependenceDisplay.from_estimator(final_pipe, train_df[feats], top_3, ax=ax)
+        img_data = io.BytesIO()
+        plt.savefig(img_data, format="png")
+        _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/pdp_plots.png", img_data.getvalue(), "image/png")
 
-    # --- Output path: DAILY folder structure ---
-    now_utc = pd.Timestamp.utcnow().tz_convert("UTC")
-    out_key = f"{OUTPUT_PREFIX}/{now_utc.strftime('%Y%m%d')}/preds.csv"
+    return {"status": "ok", "mae": study.best_value, "today": str(today_local)}
 
-    if not dry_run and len(preds_df) > 0:
-        _write_csv_to_gcs(client, GCS_BUCKET, out_key, preds_df)
-        logging.info("Wrote predictions to gs://%s/%s (%d rows)", GCS_BUCKET, out_key, len(preds_df))
-    else:
-        logging.info("Dry run or no holdout rows; skip write. Would write to gs://%s/%s", GCS_BUCKET, out_key)
-
-    return {
-        "status": "ok",
-        "today_local": str(today_local),
-        "train_rows": int(len(train_df)),
-        "holdout_rows": int(len(holdout_df)),
-        "valid_price_rows": valid_price_rows,
-        "mae_today": mae_today,
-        "output_key": out_key,
-        "dry_run": dry_run,
-        "timezone": TIMEZONE,
-    }
 
 def train_dt_http(request):
     try:
         body = request.get_json(silent=True) or {}
-        result = run_once(
-            dry_run=bool(body.get("dry_run", False)),
-            max_depth=int(body.get("max_depth", 12)),
-            min_samples_leaf=int(body.get("min_samples_leaf", 10)),
-        )
+        # result = run_once(
+        #     dry_run=bool(body.get("dry_run", False)),
+        #     max_depth=int(body.get("max_depth", 12)),
+        #     min_samples_leaf=int(body.get("min_samples_leaf", 10)),
+        # )
+
+        result = run_once(dry_run=bool(body.get("dry_run", False)))
+
+
         code = 200 if result.get("status") == "ok" else 204
         return (json.dumps(result), code, {"Content-Type": "application/json"})
     except Exception as e:

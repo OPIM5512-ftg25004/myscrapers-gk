@@ -1,0 +1,44 @@
+name: Train Model and Sync Artifacts
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  sync-artifacts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Trigger Training Function
+        run: |
+          curl -X POST https://us-central1-my-project-myscrapers-gk.cloudfunctions.net/train-dt \
+          -H "Content-Type: application/json" \
+          -d '{"dry_run": false}'
+          
+      - name: Wait for Cloud Function
+        run: sleep 60 # Essential: gives Optuna time to finish and write files
+
+      - name: Download Artifacts from GCS
+        run: |
+          mkdir -p ./artifacts/
+          # This copies EVERYTHING from the preds folder to ensure we don't miss 
+          # the folder if there's a timezone/date offset mismatch
+          gsutil -m cp -r "gs://${{ secrets.GCS_BUCKET }}/structured/preds/**" ./artifacts/
+
+      - name: Commit and Push to GitHub
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add artifacts/
+          git commit -m "Automated model artifacts for $(date +'%Y-%m-%d')" || exit 0
+          git push
