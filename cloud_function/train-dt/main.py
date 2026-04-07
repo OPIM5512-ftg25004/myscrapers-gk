@@ -4,6 +4,7 @@
 import os, io, json, logging, traceback, re
 import numpy as np
 import pandas as pd
+import optuna
 from google.cloud import storage
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
@@ -54,14 +55,48 @@ def run_once(dry_run = False):
     num_cols = ["year_num", "mileage_num"]
     feats = cat_cols + num_cols
 
-    # 3. Perform Pipeline Preprocessing
-    preprocess = ColumnTransformer([
+    # 3. Time-Series Split (Past vs Today)
+    df["dt"] = pd.to_datetime(df["scraped_at"], utc=True).dt.tz_convert(TIMEZONE)
+    unique_dates = sorted(df["dt"].dt.date.dropna().unique())
+    today = unique_dates[-1]
+    
+    train_df = df[df["dt"].dt.date < today].dropna(subset=[target])
+    holdout_df = df[df["dt"].dt.date == today]
+
+    X_train, y_train = train_df[feats], train_df[target]
+
+    # 4. Perform Pipeline Preprocessing
+    pre = ColumnTransformer([
             ("num", SimpleImputer(strategy="median"), num_cols),
             ("cat", Pipeline([
                 ("imp", SimpleImputer(strategy="most_frequent")),
                 ("oh", OneHotEncoder(handle_unknown="ignore"))
             ]), cat_cols)
         ])
+
+    # 5. Perform Hyperparameter Tuning with Optuna
+    def objective(trial):
+        params = {
+            "max_depth": trial.suggest_int("max_depth", 3, 20),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 30),
+            "min_samples_split": trial.suggest_int("min_samples_split", 2, 20)
+        }
+        model = DecisionTreeRegressor(**params, random_state=42)
+        pipe = Pipeline([("pre", pre), ("reg", model)])
+        
+        # Simple Validation split (last 20% of training data)
+        split = int(len(X_train) * 0.8)
+        pipe.fit(X_train.iloc[:split], y_train.iloc[:split])
+        val_preds = pipe.predict(X_train.iloc[split:])
+        return mean_absolute_error(y_train.iloc[split:], val_preds)
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=20)
+    
+    # Final Fit with Best Parameters
+    final_model = DecisionTreeRegressor(**study.best_params, random_state=42)
+    final_pipe = Pipeline([("pre", pre), ("reg", final_model)])
+    final_pipe.fit(X_train, y_train)
 
 def run_once(dry_run: bool = False, max_depth: int = 12, min_samples_leaf: int = 10):
     client = storage.Client(project=PROJECT_ID)
