@@ -4,8 +4,11 @@
 import os, io, json, logging, traceback
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import optuna
+
 from google.cloud import storage
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
@@ -18,7 +21,7 @@ from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 # ---- ENV ----
 PROJECT_ID     = os.getenv("PROJECT_ID", "")
 GCS_BUCKET     = os.getenv("GCS_BUCKET", "")
-DATA_KEY       = os.getenv("DATA_KEY", "structured/datasets/listings_master.csv")
+DATA_KEY       = os.getenv("DATA_KEY", "structured/datasets/listings_master_llm.csv")
 OUTPUT_PREFIX  = os.getenv("OUTPUT_PREFIX", "structured/preds")            # e.g., "structured/preds"
 TIMEZONE       = os.getenv("TIMEZONE", "America/New_York")      # split by local day
 LOG_LEVEL      = os.getenv("LOG_LEVEL", "INFO")

@@ -31,9 +31,8 @@ jobs:
       - name: Download Artifacts from GCS
         run: |
           mkdir -p ./artifacts/
-          # This copies EVERYTHING from the preds folder to ensure we don't miss 
-          # the folder if there's a timezone/date offset mismatch
-          gsutil -m cp -r "gs://${{ secrets.GCS_BUCKET }}/structured/preds/**" ./artifacts/
+          # Using gcloud storage instead of gsutil to ensure authentication is used
+          gcloud storage cp -r "gs://${{ secrets.GCS_BUCKET }}/structured/preds/**" ./artifacts/
 
       - name: Commit and Push to GitHub
         run: |
