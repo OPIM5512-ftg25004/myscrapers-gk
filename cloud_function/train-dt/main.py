@@ -48,6 +48,7 @@ def _clean_numeric(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 def run_once(dry_run=False):
+    logging.info("Running Training Version 2.0 with Categorical Fix")
     client = storage.Client(project=PROJECT_ID)
     df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
 
@@ -88,11 +89,13 @@ def run_once(dry_run=False):
     feats = cat_cols + num_cols
     target = "price_num"
 
+    # Force OneHotEncoder to treat everything as a string internally
     pre = ColumnTransformer([
         ("num", SimpleImputer(strategy="median"), num_cols),
         ("cat", Pipeline([
             ("imp", SimpleImputer(strategy="most_frequent")),
-            ("oh", OneHotEncoder(handle_unknown="ignore"))
+            # Use dtype=str to force the encoder to treat inputs as strings
+            ("oh", OneHotEncoder(handle_unknown="ignore", dtype=str)) 
         ]), cat_cols)
     ])
 
