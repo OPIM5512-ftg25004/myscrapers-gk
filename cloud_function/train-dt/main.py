@@ -95,7 +95,7 @@ def run_once(dry_run=False):
         ("num", SimpleImputer(strategy="median"), num_cols),
         ("cat", Pipeline([
             ("imp", SimpleImputer(strategy="most_frequent")),
-            ("oh", OneHotEncoder(handle_unknown="ignore")) 
+            ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
         ]), cat_cols)
     ])
 
@@ -118,35 +118,33 @@ def run_once(dry_run=False):
     final_pipe = Pipeline([("pre", pre), ("reg", DecisionTreeRegressor(**study.best_params, random_state=42))])
     final_pipe.fit(train_df[feats], train_df[target])
 
-    # 5. Output Logic
-    date_str = today_local.strftime('%Y%m%d') if hasattr(today_local, 'strftime') else str(today_local).replace("-","")
-    out_dir = f"{OUTPUT_PREFIX}/{date_str}"
+    # 5. Output Logic with Flat Path
+    # Save directly to the prefix folder so GitHub doesn't have to guess the date
+    out_dir = OUTPUT_PREFIX 
     
-    # Predictions
     y_hat = final_pipe.predict(holdout_df[feats])
     preds_df = holdout_df[["post_id", "scraped_at", "make", "model", "year", "mileage", "price"]].copy()
     preds_df["actual_price"] = holdout_df["price_num"]
     preds_df["pred_price"] = np.round(y_hat, 2)
 
     if not dry_run:
+        # Overwrite the same 3 files every day
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/preds.csv", preds_df)
         
-        # Artifact: Permutation Importance
         perm = permutation_importance(final_pipe, train_df[feats], train_df[target], n_repeats=5)
         imp_df = pd.DataFrame({"feature": feats, "importance": perm.importances_mean})
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/importance.csv", imp_df)
 
-        # Artifact: Partial Dependence Plots (PDP)
         top_3 = imp_df.sort_values("importance", ascending=False)["feature"].head(3).tolist()
         fig, ax = plt.subplots(1, 3, figsize=(15, 5))
         PartialDependenceDisplay.from_estimator(final_pipe, train_df[feats], top_3, ax=ax)
         
         img_data = io.BytesIO()
         plt.savefig(img_data, format="png")
-        plt.close(fig) # Free memory
+        plt.close(fig)
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/pdp_plots.png", img_data.getvalue(), "image/png")
 
-    return {"status": "ok", "mae": study.best_value, "today": str(today_local), "best_params": study.best_params}
+    return {"status": "ok", "mae": study.best_value, "files_written_to": out_dir}
 
 def train_dt_http(request):
     try:

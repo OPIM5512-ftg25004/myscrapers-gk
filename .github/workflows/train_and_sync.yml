@@ -21,9 +21,12 @@ jobs:
 
       - name: Trigger Training Function
         run: |
-          curl -X POST https://train-dt-jbs7rqqlqq-uc.a.run.app \
+          RESPONSE=$(curl -s -X POST https://train-dt-jbs7rqqlqq-uc.a.run.app \
           -H "Content-Type: application/json" \
-          -d '{"dry_run": false}'
+          -d '{"dry_run": false}')
+          echo "Function Response: $RESPONSE"
+          # This forces the action to fail if the function returned an error
+          if [[ "$RESPONSE" == *"error"* ]]; then exit 1; fi
           
       - name: Wait for Cloud Function
         run: sleep 60 # Essential: gives Optuna time to finish and write files
@@ -31,8 +34,10 @@ jobs:
       - name: Download Artifacts from GCS
         run: |
           mkdir -p ./artifacts/
-          # Using gcloud storage instead of gsutil to ensure authentication is used
-          gcloud storage cp -r "gs://${{ secrets.GCS_BUCKET }}/structured/preds/**" ./artifacts/
+          # No more $DATE or wildcards needed!
+          gcloud storage cp gs://${{ secrets.GCS_BUCKET }}/structured/preds/preds.csv ./artifacts/
+          gcloud storage cp gs://${{ secrets.GCS_BUCKET }}/structured/preds/importance.csv ./artifacts/
+          gcloud storage cp gs://${{ secrets.GCS_BUCKET }}/structured/preds/pdp_plots.png ./artifacts/
 
       - name: Commit and Push to GitHub
         run: |
