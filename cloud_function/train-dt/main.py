@@ -1,5 +1,6 @@
+# main.py (or train-dt.py)
 # Decision Tree: train on all data < today (local TZ); hold out today
-# HTTP entrypoint: train_dt_http
+# Includes Optuna Tuning, Permutation Importance, and PDP Plots
 
 import os, io, json, logging, traceback
 import numpy as np
@@ -22,8 +23,8 @@ from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 PROJECT_ID     = os.getenv("PROJECT_ID", "")
 GCS_BUCKET     = os.getenv("GCS_BUCKET", "")
 DATA_KEY       = os.getenv("DATA_KEY", "structured/datasets/listings_master_llm.csv")
-OUTPUT_PREFIX  = os.getenv("OUTPUT_PREFIX", "structured/preds")            # e.g., "structured/preds"
-TIMEZONE       = os.getenv("TIMEZONE", "America/New_York")      # split by local day
+OUTPUT_PREFIX  = os.getenv("OUTPUT_PREFIX", "structured/preds")
+TIMEZONE       = os.getenv("TIMEZONE", "America/New_York")
 LOG_LEVEL      = os.getenv("LOG_LEVEL", "INFO")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
@@ -42,13 +43,7 @@ def _write_to_gcs(client, bucket, key, data, content_type="text/csv"):
     else:
         blob.upload_from_string(data, content_type=content_type)
 
-def _write_csv_to_gcs(client: storage.Client, bucket: str, key: str, df: pd.DataFrame):
-    b = client.bucket(bucket)
-    blob = b.blob(key)
-    blob.upload_from_string(df.to_csv(index=False), content_type="text/csv")
-
 def _clean_numeric(s: pd.Series) -> pd.Series:
-    # Strip $, commas, spaces; keep digits and dot
     s = s.astype(str).str.replace(r"[^\d.]+", "", regex=True).str.strip()
     return pd.to_numeric(s, errors="coerce")
 
@@ -56,7 +51,16 @@ def run_once(dry_run=False):
     client = storage.Client(project=PROJECT_ID)
     df = _read_csv_from_gcs(client, GCS_BUCKET, DATA_KEY)
 
-    # 1.  Cleaning & Date Splitting
+    # 1. Categorical Cleaning (before splitting)
+    cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
+    for col in cat_cols:
+        df[col] = df[col].astype(str).str.strip()
+        missing_variants = ["", "nan", "None", "null", "NaN", "nan"]
+        df[col] = df[col].replace(missing_variants, "unknown")
+    
+    df['zip_code'] = df['zip_code'].str.zfill(5)
+
+    # 2. Date Splitting & Numeric Cleaning
     dt = pd.to_datetime(df["scraped_at"], errors="coerce", utc=True)
     try:
         df["dt_local"] = dt.dt.tz_convert(TIMEZONE)
@@ -73,29 +77,13 @@ def run_once(dry_run=False):
         return {"status": "noop", "reason": "need at least two distinct dates"}
 
     today_local = unique_dates[-1]
-    train_df = df[df["date_local"] < today_local].dropna(subset=["price_num"])
+    train_df = df[df["date_local"] < today_local].dropna(subset=["price_num"]).copy()
     holdout_df = df[df["date_local"] == today_local].copy()
 
     if len(train_df) < 40:
         return {"status": "noop", "reason": "too few training rows", "count": len(train_df)}
 
-    # 2. Advanced Features & Modeling
-    cat_cols = ["make", "model", "color", "city", "state", "zip_code"]
-    for col in cat_cols:
-        # 1. Convert to string (fixes the mixed-type sorting error)
-        df[col] = df[col].astype(str)
-    
-        # 2. Trim whitespace and handle "nan" strings or empty values
-        df[col] = df[col].str.strip()
-    
-        # 3. Standardize all "missing" variants to a single label
-        # This catches: "", "nan", "None", "null"
-        missing_variants = ["", "nan", "None", "None", "null", "nan"]
-        df[col] = df[col].replace(missing_variants, "unknown")
-        
-    # Clean up zip_code specifically one more time if needed
-    df['zip_code'] = df['zip_code'].str.zfill(5)
-
+    # 3. Modeling Pipeline
     num_cols = ["year_num", "mileage_num"]
     feats = cat_cols + num_cols
     target = "price_num"
@@ -108,13 +96,13 @@ def run_once(dry_run=False):
         ]), cat_cols)
     ])
 
+    # 4. Optuna Hyperparameter Tuning
     def objective(trial):
         params = {
             "max_depth": trial.suggest_int("max_depth", 3, 20),
             "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 30)
         }
         pipe = Pipeline([("pre", pre), ("reg", DecisionTreeRegressor(**params, random_state=42))])
-        # Simple split for speed
         split = int(len(train_df) * 0.8)
         pipe.fit(train_df[feats].iloc[:split], train_df[target].iloc[:split])
         preds = pipe.predict(train_df[feats].iloc[split:])
@@ -123,11 +111,13 @@ def run_once(dry_run=False):
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=15)
     
+    # Final Model Fit
     final_pipe = Pipeline([("pre", pre), ("reg", DecisionTreeRegressor(**study.best_params, random_state=42))])
     final_pipe.fit(train_df[feats], train_df[target])
 
-    # 3. Artifact Generation & Output
-    out_dir = f"{OUTPUT_PREFIX}/{today_local.strftime('%Y%m%d')}" if hasattr(today_local, 'strftime') else f"{OUTPUT_PREFIX}/{today_local}"
+    # 5. Output Logic
+    date_str = today_local.strftime('%Y%m%d') if hasattr(today_local, 'strftime') else str(today_local).replace("-","")
+    out_dir = f"{OUTPUT_PREFIX}/{date_str}"
     
     # Predictions
     y_hat = final_pipe.predict(holdout_df[feats])
@@ -136,37 +126,29 @@ def run_once(dry_run=False):
     preds_df["pred_price"] = np.round(y_hat, 2)
 
     if not dry_run:
-        # Save CSV
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/preds.csv", preds_df)
         
-        # Save Permutation Importance
+        # Artifact: Permutation Importance
         perm = permutation_importance(final_pipe, train_df[feats], train_df[target], n_repeats=5)
         imp_df = pd.DataFrame({"feature": feats, "importance": perm.importances_mean})
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/importance.csv", imp_df)
 
-        # Save PDP Plots
+        # Artifact: Partial Dependence Plots (PDP)
         top_3 = imp_df.sort_values("importance", ascending=False)["feature"].head(3).tolist()
         fig, ax = plt.subplots(1, 3, figsize=(15, 5))
         PartialDependenceDisplay.from_estimator(final_pipe, train_df[feats], top_3, ax=ax)
+        
         img_data = io.BytesIO()
         plt.savefig(img_data, format="png")
+        plt.close(fig) # Free memory
         _write_to_gcs(client, GCS_BUCKET, f"{out_dir}/pdp_plots.png", img_data.getvalue(), "image/png")
 
-    return {"status": "ok", "mae": study.best_value, "today": str(today_local)}
-
+    return {"status": "ok", "mae": study.best_value, "today": str(today_local), "best_params": study.best_params}
 
 def train_dt_http(request):
     try:
         body = request.get_json(silent=True) or {}
-        # result = run_once(
-        #     dry_run=bool(body.get("dry_run", False)),
-        #     max_depth=int(body.get("max_depth", 12)),
-        #     min_samples_leaf=int(body.get("min_samples_leaf", 10)),
-        # )
-
         result = run_once(dry_run=bool(body.get("dry_run", False)))
-
-
         code = 200 if result.get("status") == "ok" else 204
         return (json.dumps(result), code, {"Content-Type": "application/json"})
     except Exception as e:
