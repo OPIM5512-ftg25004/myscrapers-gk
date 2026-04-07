@@ -1,9 +1,9 @@
 feature,importance
-make,0.0
+make,0.008393277522680464
 model,0.0
-color,0.0
+color,0.019845336975283658
 city,0.0
 state,0.0
 zip_code,0.0
-year_num,0.32944367438674677
-mileage_num,0.5885092251852901
+year_num,0.37625881673891187
+mileage_num,0.6437706947046832
