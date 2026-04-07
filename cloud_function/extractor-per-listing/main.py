@@ -41,6 +41,13 @@ YEAR_RE       = re.compile(r"\b(19|20)\d{2}\b")
 MAKE_MODEL_RE = re.compile(r"\b([A-Z][a-z]+)\s+([A-Z][A-Za-z0-9]+)")
 FUEL_TYPE = re.compile(r'\b(gas|gasoline|diesel|hybrid|electric|other)', re.IGNORECASE)
 TITLE_STATUS = re.compile(r'\b(clean|salvage|rebuilt|parts only|lien|missing|)', re.IGNORECASE)
+MILEAGE = re.compile(r'\b([0-9,]+)\s?(?:mi|miles|mileage)\b', re.IGNORECASE)
+TRANSMISSION = re.compile(r'\b(manual|automatic|other)', re.IGNORECASE)
+CONDITION = re.compile(r'\b(new|like new|excellent|good|fair|salvage)', re.IGNORECASE)
+COLOR = re.compile(r'\b(black|blue|brown|green|grey|orange|purple|red|silver|white|yellow|custom)', re.IGNORECASE)
+CITY = re.compile(r'\b(?:City|In|Near):\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b')
+STATE = re.compile(r'\b([A-Z]{2})\b')
+ZIP_CODE = re.compile(r'\b(\d{5}(?:-\d{4})?)\b')
 
 # -------------------- HELPERS --------------------
 def _list_run_ids(bucket: str, scrapes_prefix: str) -> list[str]:
@@ -140,6 +147,30 @@ def parse_listing(text: str) -> dict:
     ts = TITLE_STATUS.search(text)
     if ts:
         d["title_status"] = ts.group(1).strip().lower()
+
+    tr = TRANSMISSION.search(text)
+    if tr:
+        d["transmission"] = tr.group(1).strip().lower()
+
+    co = CONDITION.search(text)
+    if co:
+        d["condition"] = co.group(1).strip().lower()
+
+    cl = COLOR.search(text)
+    if cl:
+        d["paint_color"] = cl.group(1).strip().lower()
+
+    ct = CITY.search(text)
+    if ct:
+        d["city"] = ct.group(1).strip()
+
+    st = STATE.search(text)
+    if st:
+        d["state"] = st.group(1).strip().upper()
+
+    zc = ZIP_CODE.search(text)
+    if zc:
+        d["zip_code"] = zc.group(1).strip()
 
     # mileage variants
     mi = None
