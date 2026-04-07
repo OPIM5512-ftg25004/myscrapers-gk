@@ -1,9 +1,10 @@
 # Decision Tree: train on all data < today (local TZ); hold out today
 # HTTP entrypoint: train_dt_http
 
-import os, io, json, logging, traceback, re
+import os, io, json, logging, traceback
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import optuna
 from google.cloud import storage
 from sklearn.compose import ColumnTransformer
@@ -12,6 +13,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_absolute_error
+from sklearn.inspection import permutation_importance, PartialDependenceDisplay
 
 # ---- ENV ----
 PROJECT_ID     = os.getenv("PROJECT_ID", "")
