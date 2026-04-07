@@ -21,7 +21,7 @@ jobs:
 
       - name: Trigger Training Function
         run: |
-          curl -X POST https://us-central1-my-project-myscrapers-gk.cloudfunctions.net/train-dt-http \
+          curl -X POST https://train-dt-jbs7rqqlqq-uc.a.run.app \
           -H "Content-Type: application/json" \
           -d '{"dry_run": false}'
           
