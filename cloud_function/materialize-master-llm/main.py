@@ -86,6 +86,12 @@ def _write_csv(records: Iterable[Dict], dest_key: str, columns=CSV_COLUMNS) -> i
         w = csv.DictWriter(out, fieldnames=columns, extrasaction="ignore", restval="")
         w.writeheader()
         for rec in records:
+            zip_val = rec.get("zip_code")
+            if zip_val:
+                # Convert to string, strip any decimal points (like '1234.0'), and pad to 5 digits
+                zip_str = str(zip_val).split('.')[0].strip()
+                if zip_str.isdigit():
+                    rec["zip_code"] = zip_str.zfill(5)
             row = {c: rec.get(c, None) for c in columns}
             w.writerow(row)
             n += 1
