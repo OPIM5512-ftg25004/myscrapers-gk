@@ -174,7 +174,7 @@ def _vertex_extract_fields(raw_text: str) -> dict:
             "color": {"type": "string", "nullable": True},
             "city": {"type": "string", "nullable": True},
             "state": {"type": "string", "nullable": True},
-            "zip_code": {"type": "integer", "nullable": True}
+            "zip_code": {"type": "string", "nullable": True}
 
         },
         "required": ["price", "year", "make", "model", "mileage", "transmission", "condition", "color", "city", "state", "zip_code"]
@@ -186,8 +186,9 @@ def _vertex_extract_fields(raw_text: str) -> dict:
         "Return a strict JSON object that conforms to the provided schema. "
         "If a value is not present, use null. "
         "Rules: integers for price/year/mileage/zip_code; price in USD; mileage in miles; "
-        "do not infer values not explicitly present; do not add extra keys."
+        "zip_code should be a string (keep leading zeros); "
         "The transmission can be only automatic or manual; leave empty if not listed "
+        "do not infer values not explicitly present; do not add extra keys."
     )
 
     # FIX: Combine instruction and text into one prompt string (SDK compatibility)
